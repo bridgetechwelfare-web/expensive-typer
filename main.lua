@@ -9,6 +9,24 @@ import "android.content.Context"
 import "android.net.Uri"
 import "android.os.Handler"
 import "android.os.Looper"
+import "com.androlua.Http"           -- ═══ NEW ═══
+
+-- ═══════════════════════════════════════════════════════════
+-- ═══ NEW: AUTO-UPDATE CONFIGURATION ═══
+-- ═══════════════════════════════════════════════════════════
+local CURRENT_VERSION = "1.0"
+local GITHUB_BRANCH  = "main"
+local VERSION_URL    = "https://raw.githubusercontent.com/bridgetechwelfare-web/expensive-typer/" .. GITHUB_BRANCH .. "/version.txt"
+local UPDATE_CODE_URL= "https://raw.githubusercontent.com/bridgetechwelfare-web/expensive-typer/" .. GITHUB_BRANCH .. "/main.lua"
+local PLUGIN_PATH    = "/storage/emulated/0/解说/Plugins/expensive typer/main.lua"
+local updateInProgress = false
+local mainHandler    = Handler(Looper.getMainLooper())
+
+pcall(function()
+  Http.setConnTimeout(60000)
+  Http.setReadTimeout(60000)
+end)
+-- ═══ END NEW ═══
 
 local langFile = os.getenv("EXTERNAL_STORAGE") .. "/expensive_typer_lang.dat"
 local transLangFile = os.getenv("EXTERNAL_STORAGE") .. "/expensive_typer_trans_lang.dat"
@@ -174,7 +192,7 @@ local emojiMap = {
   ["mohabbat"]="馃挅",
   ["pyar"]="馃挅",
   ["love"]="鉂わ笍",
-  ["dost"]="馃",
+  ["dost"]="馃",
   ["dil"]="鉂わ笍",
   ["jaan"]="馃挄",
   ["dua"]="馃げ",
@@ -224,6 +242,140 @@ function applyTypingMode(text)
     return text
   end
 end
+
+-- ═══════════════════════════════════════════════════════════
+-- ═══ NEW: AUTO-UPDATE FUNCTIONS ═══
+-- ═══════════════════════════════════════════════════════════
+function showUpdateMessage(title, msg)
+  local d = LuaDialog(service)
+  d.setTitle(title)
+  d.setMessage(msg)
+  d.setButton("OK", function() d.dismiss() end)
+  d.show()
+end
+
+function checkForUpdates(silentMode)
+  if updateInProgress then
+    if not silentMode then
+      showUpdateMessage("Update In Progress", "Please wait for current update to finish.")
+    end
+    return
+  end
+
+  local ts = tostring(os.time())
+  Http.get(VERSION_URL .. "?t=" .. ts, function(code, response)
+    if code ~= 200 or not response then
+      if not silentMode then
+        mainHandler.post(luajava.createProxy("java.lang.Runnable", {
+          run = function() showUpdateMessage("Update Check Failed", "Could not connect. Code: " .. tostring(code)) end
+        }))
+      end
+      return
+    end
+
+    local onlineVersion = tostring(response):gsub("%s+", "")
+    if onlineVersion == "" then
+      if not silentMode then
+        mainHandler.post(luajava.createProxy("java.lang.Runnable", {
+          run = function() showUpdateMessage("Update Check Failed", "Version file is empty on GitHub.") end
+        }))
+      end
+      return
+    end
+
+    if onlineVersion == CURRENT_VERSION then
+      if not silentMode then
+        mainHandler.post(luajava.createProxy("java.lang.Runnable", {
+          run = function() showUpdateMessage("Up to Date", "You are already on the latest version (" .. CURRENT_VERSION .. ").") end
+        }))
+      end
+      return
+    end
+
+    -- Version changed → download new main.lua
+    Http.get(UPDATE_CODE_URL .. "?t=" .. ts, function(code2, newCode)
+      if code2 ~= 200 or not newCode or newCode:gsub("%s+", "") == "" then
+        mainHandler.post(luajava.createProxy("java.lang.Runnable", {
+          run = function() showUpdateMessage("Update Failed", "Could not download new version. Code: " .. tostring(code2)) end
+        }))
+        return
+      end
+
+      mainHandler.post(luajava.createProxy("java.lang.Runnable", {
+        run = function()
+          local d = LuaDialog(service)
+          d.setTitle("Update Available")
+          d.setMessage("New version: " .. onlineVersion .. "\nCurrent version: " .. CURRENT_VERSION .. "\n\nDo you want to update now?")
+          d.setButton("Update Now", function()
+            d.dismiss()
+            performUpdate(newCode, onlineVersion)
+          end)
+          d.setButton2("Later", function() d.dismiss() end)
+          d.show()
+        end
+      }))
+    end)
+  end)
+end
+
+function performUpdate(newCode, onlineVersion)
+  if not newCode or newCode:gsub("%s+", "") == "" then
+    showUpdateMessage("Update Failed", "Empty update code received.")
+    return
+  end
+
+  updateInProgress = true
+  local tempPath = PLUGIN_PATH .. ".temp_update"
+
+  local thread = luajava.newInstance("java.lang.Thread", luajava.createProxy("java.lang.Runnable", {
+    run = function()
+      local success = false
+      local errMsg = ""
+
+      pcall(function()
+        local f = io.open(tempPath, "w")
+        if not f then error("Cannot create temp file at: " .. tempPath) end
+        f:write(newCode)
+        f:close()
+
+        -- Delete old file
+        local check = io.open(PLUGIN_PATH, "r")
+        if check then
+          check:close()
+          local removed = os.remove(PLUGIN_PATH)
+          if not removed then error("Cannot delete old file") end
+        end
+
+        -- Rename temp → target
+        local ok, rerr = os.rename(tempPath, PLUGIN_PATH)
+        if ok then
+          success = true
+        else
+          error("Rename failed: " .. tostring(rerr))
+        end
+      end)
+
+      updateInProgress = false
+
+      mainHandler.post(luajava.createProxy("java.lang.Runnable", {
+        run = function()
+          if success then
+            local d = LuaDialog(service)
+            d.setTitle("Update Successful")
+            d.setMessage("Updated to version " .. onlineVersion .. ".\n\nPlease restart the plugin/app for changes to take effect.")
+            d.setButton("OK", function() d.dismiss() end)
+            d.show()
+          else
+            pcall(function() os.remove(tempPath) end)
+            showUpdateMessage("Update Failed", "Could not write new version file.\n\nPlease check storage permission for:\n" .. PLUGIN_PATH)
+          end
+        end
+      }))
+    end
+  }))
+  thread.start()
+end
+-- ═══ END NEW ═══
 
 function showSearchLanguageDialog(title, saveFile)
   local dlg = LuaDialog(service)
@@ -342,8 +494,7 @@ function showSettingsDialog()
     testResult.setText("Testing... Please Wait")
     testResult.setTextColor(0xFFFF9800)
     testBtn.setEnabled(false)
-    local mainHandler = Handler(Looper.getMainLooper())
-    local thread = luajava.newInstance("java.lang.Thread", luajava.createProxy("java.lang.Runnable", {
+    local th = luajava.newInstance("java.lang.Thread", luajava.createProxy("java.lang.Runnable", {
       run = function()
         local success = false
         local errMsg = ""
@@ -373,7 +524,7 @@ function showSettingsDialog()
         }))
       end
     }))
-    thread.start()
+    th.start()
   end
   dlg.setView(view)
   dlg.show()
@@ -473,7 +624,7 @@ function showMainDialog()
     ScrollView; layout_width="fill"; layout_height="fill";
     { LinearLayout; orientation="vertical"; padding="20dp";
       { TextView; text="Expensive Typer"; textSize="20sp"; gravity="center"; layout_marginBottom="2dp"; textColor="#FF9800"; };
-      { TextView; text="Developed by Bridge Tech"; textSize="14sp"; gravity="center"; layout_marginBottom="15dp"; textColor="#AAAAAA"; };
+      { TextView; text="Developed by Bridge Tech  |  v" .. CURRENT_VERSION; textSize="14sp"; gravity="center"; layout_marginBottom="15dp"; textColor="#AAAAAA"; };   -- ═══ UPDATED (version added) ═══
       { Button; text="Select Typing Language"; textSize="15sp"; layout_width="fill"; layout_marginBottom="8dp"; onClick=function() showSearchLanguageDialog("Select Typing Language", langFile) end; };
       { CheckBox; id="transToggle"; text="Enable Translation Mode"; textSize="15sp"; layout_marginBottom="5dp"; };
       { Button; text="Select Translation Language"; textSize="14sp"; layout_width="fill"; layout_marginBottom="10dp"; onClick=function() showSearchLanguageDialog("Select Translation Language", transLangFile) end; };
@@ -485,6 +636,7 @@ function showMainDialog()
       { TextView; text="End Punctuation:"; textSize="14sp"; textColor="#FF9800"; layout_marginBottom="3dp"; };
       { Spinner; id="punctSpinner"; layout_width="fill"; layout_marginBottom="15dp"; };
       { Button; text="Settings"; textSize="15sp"; layout_width="fill"; layout_marginBottom="8dp"; onClick=function() showSettingsDialog() end; };
+      { Button; text="Check for Updates"; textSize="15sp"; layout_width="fill"; layout_marginBottom="8dp"; onClick=function() checkForUpdates(false) end; };   -- ═══ NEW ═══
       { Button; text="About & Official Links"; textSize="15sp"; layout_width="fill"; layout_marginBottom="15dp"; onClick=function() showAboutDialog() end; };
       { Button; text="Exit App"; textSize="15sp"; layout_width="fill"; onClick=function() dlg.dismiss() end; };
     }
@@ -510,6 +662,12 @@ function showMainDialog()
   punctSpinner.onItemSelected=function(p,v,pos,id) appSettings.punctuationMode=punctuationOptions[pos+1] saveSettings() end
   dlg.setView(view)
   dlg.show()
+
+  -- ═══ NEW: Silent auto-check for updates when main dialog opens ═══
+  mainHandler.postDelayed(luajava.createProxy("java.lang.Runnable", {
+    run = function() pcall(function() checkForUpdates(true) end) end
+  }), 3000)
+  -- ═══ END NEW ═══
 end
 
 loadDictionary()
