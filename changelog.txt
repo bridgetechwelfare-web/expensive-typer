@@ -1,0 +1,4 @@
+What's New in v1.2
+- Fixed minor errors and bugs.
+- Now more smooth and stable.
+- Added What's New message after update.
