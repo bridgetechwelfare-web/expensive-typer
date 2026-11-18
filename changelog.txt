@@ -1,5 +1,5 @@
-What's New in v1.3
+ What's New in v1.4
+- What's New message will now show first before opening the extension.
 - Translation is now fixed and working correctly.
 - Removed all paid models. Only free and working models are available now.
-- All functions have been checked and fixed.
 - App is now more smooth, fast and stable.
