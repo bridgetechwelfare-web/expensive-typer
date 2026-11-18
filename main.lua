@@ -12,7 +12,7 @@ import "android.os.Looper"
 import "com.androlua.Http"
 
 -- ═══ AUTO-UPDATE CONFIG ═══
-local CURRENT_VERSION = "1.3"
+local CURRENT_VERSION = "1.4"
 local GITHUB_BRANCH  = "main"
 local VERSION_URL    = "https://raw.githubusercontent.com/bridgetechwelfare-web/expensive-typer/" .. GITHUB_BRANCH .. "/version.txt"
 local UPDATE_CODE_URL= "https://raw.githubusercontent.com/bridgetechwelfare-web/expensive-typer/" .. GITHUB_BRANCH .. "/main.lua"
@@ -282,7 +282,7 @@ function showUpdateMessage(title, msg)
   d.show()
 end
 
-function showWhatsNewIfNeeded()
+function showWhatsNewIfNeeded(onDone)
   local f = io.open(lastShownVersionFile, "r")
   local lastVer = ""
   if f then lastVer = f:read("*all") or "" f:close() end
@@ -295,13 +295,20 @@ function showWhatsNewIfNeeded()
         local d = LuaDialog(service)
         d.setTitle("What's New in v" .. CURRENT_VERSION)
         d.setMessage(msg)
-        d.setButton("OK", function() d.dismiss() end)
+        d.setButton("OK", function()
+          d.dismiss()
+          local wf = io.open(lastShownVersionFile, "w")
+          if wf then wf:write(CURRENT_VERSION) wf:close() end
+          if onDone then onDone() end
+        end)
         d.show()
+        return
       end
     end
     local wf = io.open(lastShownVersionFile, "w")
     if wf then wf:write(CURRENT_VERSION) wf:close() end
   end
+  if onDone then onDone() end
 end
 
 function checkForUpdates(silentMode)
@@ -670,6 +677,7 @@ function showMainDialog()
 end
 
 loadDictionary()
-showWhatsNewIfNeeded()
-local editText = service.getEditText()
-if editText then startVoiceTyping() else showMainDialog() end
+showWhatsNewIfNeeded(function()
+  local editText = service.getEditText()
+  if editText then startVoiceTyping() else showMainDialog() end
+end)
