@@ -1,4 +1,5 @@
-What's New in v1.2
-- Fixed minor errors and bugs.
-- Now more smooth and stable.
-- Added What's New message after update.
+What's New in v1.3
+- Translation is now fixed and working correctly.
+- Removed all paid models. Only free and working models are available now.
+- All functions have been checked and fixed.
+- App is now more smooth, fast and stable.
