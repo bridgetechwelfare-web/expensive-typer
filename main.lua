@@ -11,10 +11,8 @@ import "android.os.Handler"
 import "android.os.Looper"
 import "com.androlua.Http"
 
--- ═══════════════════════════════════════════════════════════
--- ═══ AUTO-UPDATE CONFIGURATION ═══
--- ═══════════════════════════════════════════════════════════
-local CURRENT_VERSION = "1.2"
+-- ═══ AUTO-UPDATE CONFIG ═══
+local CURRENT_VERSION = "1.3"
 local GITHUB_BRANCH  = "main"
 local VERSION_URL    = "https://raw.githubusercontent.com/bridgetechwelfare-web/expensive-typer/" .. GITHUB_BRANCH .. "/version.txt"
 local UPDATE_CODE_URL= "https://raw.githubusercontent.com/bridgetechwelfare-web/expensive-typer/" .. GITHUB_BRANCH .. "/main.lua"
@@ -40,7 +38,7 @@ local appSettings = {
   emojiEnabled = false,
   typingMode = "Smart Pro Mode",
   punctuationMode = "Period (.)",
-  geminiModel = "gemini-4-hydrogen",
+  geminiModel = "gemini-2.0-flash",
   geminiApiKey = ""
 }
 
@@ -132,6 +130,7 @@ end
 
 local languageItems = {"Urdu (Pakistan)","English (US)","English (UK)","Hindi (India)","Arabic (Saudi Arabia)","French (France)","German (Germany)","Spanish (Spain)","Turkish (Turkey)","Chinese (Mandarin)","Japanese (Japan)","Korean (South Korea)"}
 local languageCodes = {"ur-PK","en-US","en-GB","hi-IN","ar-SA","fr-FR","de-DE","es-ES","tr-TR","zh-CN","ja-JP","ko-KR"}
+local languageNamesForAI = {["ur-PK"]="Urdu",["en-US"]="English",["en-GB"]="English",["hi-IN"]="Hindi",["ar-SA"]="Arabic",["fr-FR"]="French",["de-DE"]="German",["es-ES"]="Spanish",["tr-TR"]="Turkish",["zh-CN"]="Chinese",["ja-JP"]="Japanese",["ko-KR"]="Korean"}
 
 local uniqueTypingModes = {
   "Smart Pro Mode",
@@ -142,15 +141,12 @@ local uniqueTypingModes = {
   "Dua / Respect Mode"
 }
 
+-- ═══ SIRF FREE AUR WORKING MODELS ═══
 local geminiModelsList = {
-  "gemini-4-hydrogen",
-  "gemini-4-argon",
-  "gemini-4-carbon",
-  "grok-4.7",
-  "gemini-3-flash",
-  "gemini-3-pro",
+  "gemini-2.0-flash",
   "gemini-2.5-flash",
-  "gemini-2.5-pro"
+  "gemini-1.5-flash",
+  "gemini-1.5-flash-8b"
 }
 
 local punctuationOptions = {
@@ -245,9 +241,39 @@ function applyTypingMode(text)
   end
 end
 
--- ═══════════════════════════════════════════════════════════
--- ═══ AUTO-UPDATE + WHATS NEW FUNCTIONS ═══
--- ═══════════════════════════════════════════════════════════
+-- ═══ TRANSLATION FIX - AB ASLI TRANSLATION HOGI ═══
+function translateWithGemini(text, targetCode, callback)
+  local apiKey = (appSettings.geminiApiKey or ""):gsub("%s+","")
+  if apiKey == "" or not appSettings.translationEnabled then
+    callback(text)
+    return
+  end
+  local targetName = languageNamesForAI[targetCode] or "English"
+  local model = appSettings.geminiModel or "gemini-2.0-flash"
+  local prompt = "Translate the following text to " .. targetName .. ". Only return the translated text, no explanation, no quotes: " .. text
+  local url = "https://generativelanguage.googleapis.com/v1beta/models/" .. model .. ":generateContent?key=" .. apiKey
+  local body = '{"contents":[{"parts":[{"text":' .. string.format("%q", prompt) .. '}]}]}'
+  Http.post(url, body, "application/json", function(code, response)
+    if code == 200 and response and response ~= "" then
+      local ok, result = pcall(function()
+        local fn = loadstring("return " .. response:gsub('"([%w_]+)":', '["%1"]='))
+        if fn then return fn() end
+        return nil
+      end)
+      -- Simple parse: text ke andar se nikalna
+      local translated = response:match('"text"%s*:%s*"([^"]+)"')
+      if translated then
+        translated = translated:gsub("\\n", " "):gsub('\\"', '"'):gsub("\\\\", "\\")
+        callback(translated)
+      else
+        callback(text)
+      end
+    else
+      callback(text)
+    end
+  end)
+end
+
 function showUpdateMessage(title, msg)
   local d = LuaDialog(service)
   d.setTitle(title)
@@ -279,116 +305,75 @@ function showWhatsNewIfNeeded()
 end
 
 function checkForUpdates(silentMode)
-  if updateInProgress then
-    if not silentMode then
-      showUpdateMessage("Update In Progress", "Please wait for current update to finish.")
-    end
-    return
-  end
+  if updateInProgress then return end
   local ts = tostring(os.time())
   Http.get(VERSION_URL .. "?t=" .. ts, function(code, response)
     if code ~= 200 or not response then
       if not silentMode then
-        mainHandler.post(luajava.createProxy("java.lang.Runnable", {
-          run = function() showUpdateMessage("Update Check Failed", "Could not connect. Code: " .. tostring(code)) end
-        }))
+        mainHandler.post(luajava.createProxy("java.lang.Runnable", { run = function() showUpdateMessage("Update Check Failed", "Could not connect. Code: " .. tostring(code)) end }))
       end
       return
     end
     local onlineVersion = tostring(response):gsub("%s+", "")
-    if onlineVersion == "" then
-      if not silentMode then
-        mainHandler.post(luajava.createProxy("java.lang.Runnable", {
-          run = function() showUpdateMessage("Update Check Failed", "Version file is empty on GitHub.") end
-        }))
-      end
-      return
-    end
+    if onlineVersion == "" then return end
     if onlineVersion == CURRENT_VERSION then
       if not silentMode then
-        mainHandler.post(luajava.createProxy("java.lang.Runnable", {
-          run = function() showUpdateMessage("Up to Date", "You are already on the latest version (" .. CURRENT_VERSION .. ").") end
-        }))
+        mainHandler.post(luajava.createProxy("java.lang.Runnable", { run = function() showUpdateMessage("Up to Date", "You are already on latest version (" .. CURRENT_VERSION .. ").") end }))
       end
       return
     end
     Http.get(UPDATE_CODE_URL .. "?t=" .. ts, function(code2, newCode)
-      if code2 ~= 200 or not newCode or newCode:gsub("%s+", "") == "" then
-        mainHandler.post(luajava.createProxy("java.lang.Runnable", {
-          run = function() showUpdateMessage("Update Failed", "Could not download new version. Code: " .. tostring(code2)) end
-        }))
-        return
-      end
-      mainHandler.post(luajava.createProxy("java.lang.Runnable", {
-        run = function()
-          local d = LuaDialog(service)
-          d.setTitle("Update Available")
-          d.setMessage("New version: " .. onlineVersion .. "\nCurrent version: " .. CURRENT_VERSION .. "\n\nDo you want to update now?")
-          d.setButton("Update Now", function()
-            d.dismiss()
-            performUpdate(newCode, onlineVersion)
-          end)
-          d.setButton2("Later", function() d.dismiss() end)
-          d.show()
-        end
-      }))
+      if code2 ~= 200 or not newCode or newCode:gsub("%s+", "") == "" then return end
+      mainHandler.post(luajava.createProxy("java.lang.Runnable", { run = function()
+        local d = LuaDialog(service)
+        d.setTitle("Update Available")
+        d.setMessage("New version: " .. onlineVersion .. "\nCurrent version: " .. CURRENT_VERSION .. "\n\nDo you want to update now?")
+        d.setButton("Update Now", function() d.dismiss() performUpdate(newCode, onlineVersion) end)
+        d.setButton2("Later", function() d.dismiss() end)
+        d.show()
+      end }))
     end)
   end)
 end
 
 function performUpdate(newCode, onlineVersion)
-  if not newCode or newCode:gsub("%s+", "") == "" then
-    showUpdateMessage("Update Failed", "Empty update code received.")
-    return
-  end
+  if not newCode or newCode:gsub("%s+", "") == "" then return end
   updateInProgress = true
   local tempPath = PLUGIN_PATH .. ".temp_update"
-  local thread = luajava.newInstance("java.lang.Thread", luajava.createProxy("java.lang.Runnable", {
-    run = function()
-      local success = false
-      pcall(function()
-        local f = io.open(tempPath, "w")
-        if not f then error("Cannot create temp file at: " .. tempPath) end
-        f:write(newCode)
-        f:close()
-        local check = io.open(PLUGIN_PATH, "r")
-        if check then
-          check:close()
-          local removed = os.remove(PLUGIN_PATH)
-          if not removed then error("Cannot delete old file") end
-        end
-        local ok, rerr = os.rename(tempPath, PLUGIN_PATH)
-        if ok then
-          success = true
-        else
-          error("Rename failed: " .. tostring(rerr))
-        end
-      end)
-      updateInProgress = false
-      mainHandler.post(luajava.createProxy("java.lang.Runnable", {
-        run = function()
-          if success then
-            pcall(function()
-              Http.get(CHANGELOG_URL .. "?t=" .. tostring(os.time()), function(c, txt)
-                if c == 200 and txt then
-                  local cf = io.open(changelogFile, "w")
-                  if cf then cf:write(txt) cf:close() end
-                end
-              end)
-            end)
-            local d = LuaDialog(service)
-            d.setTitle("Update Successful")
-            d.setMessage("Updated to version " .. onlineVersion .. ".\n\nPlease restart the plugin/app for changes to take effect.")
-            d.setButton("OK", function() d.dismiss() end)
-            d.show()
-          else
-            pcall(function() os.remove(tempPath) end)
-            showUpdateMessage("Update Failed", "Could not write new version file.\n\nPlease check storage permission for:\n" .. PLUGIN_PATH)
-          end
-        end
-      }))
-    end
-  }))
+  local thread = luajava.newInstance("java.lang.Thread", luajava.createProxy("java.lang.Runnable", { run = function()
+    local success = false
+    pcall(function()
+      local f = io.open(tempPath, "w")
+      if not f then error("Cannot create temp file") end
+      f:write(newCode)
+      f:close()
+      local check = io.open(PLUGIN_PATH, "r")
+      if check then check:close() os.remove(PLUGIN_PATH) end
+      local ok, rerr = os.rename(tempPath, PLUGIN_PATH)
+      if ok then success = true else error("Rename failed: " .. tostring(rerr)) end
+    end)
+    updateInProgress = false
+    mainHandler.post(luajava.createProxy("java.lang.Runnable", { run = function()
+      if success then
+        pcall(function()
+          Http.get(CHANGELOG_URL .. "?t=" .. tostring(os.time()), function(c, txt)
+            if c == 200 and txt then
+              local cf = io.open(changelogFile, "w")
+              if cf then cf:write(txt) cf:close() end
+            end
+          end)
+        end)
+        local d = LuaDialog(service)
+        d.setTitle("Update Successful")
+        d.setMessage("Updated to version " .. onlineVersion .. ".\n\nPlease restart plugin for changes to take effect.")
+        d.setButton("OK", function() d.dismiss() end)
+        d.show()
+      else
+        pcall(function() os.remove(tempPath) end)
+        showUpdateMessage("Update Failed", "Could not write new version file.")
+      end
+    end }))
+  end }))
   thread.start()
 end
 
@@ -439,12 +424,11 @@ function showDictionaryDialog()
     { LinearLayout; orientation="horizontal"; layout_width="fill";
       { Button; text="Cancel"; layout_width="fill"; layout_weight="1"; onClick=function() dlg.dismiss() end; };
       { View; layout_width="10dp"; };
-      { Button; text="Save Word"; layout_width="fill"; layout_weight="1";
-        onClick=function()
-          local w = wrongWord.getText().toString()
-          local c = correctWord.getText().toString()
-          if w~="" and c~="" then addToDictionary(w,c) dlg.dismiss() end
-        end; };
+      { Button; text="Save Word"; layout_width="fill"; layout_weight="1"; onClick=function()
+        local w = wrongWord.getText().toString()
+        local c = correctWord.getText().toString()
+        if w~="" and c~="" then addToDictionary(w,c) dlg.dismiss() end
+      end; };
     };
   }
   dlg.setView(loadlayout(layout))
@@ -474,19 +458,17 @@ function showSettingsDialog()
   local layout = {
     ScrollView; layout_width="fill"; layout_height="fill";
     { LinearLayout; orientation="vertical"; padding="20dp";
-      { TextView; text="Gemini API Configuration:"; textSize="14sp"; textColor="#FF9800"; layout_marginBottom="5dp"; };
+      { TextView; text="Gemini API Configuration (Free Models Only):"; textSize="14sp"; textColor="#FF9800"; layout_marginBottom="5dp"; };
       { EditText; id="apiKeyInput"; hint="Enter Gemini API Key"; text=appSettings.geminiApiKey; textSize="16sp"; layout_width="fill"; layout_marginBottom="10dp"; };
-      { Button; text="Create Gemini API Key"; textSize="14sp"; layout_width="fill"; layout_marginBottom="10dp";
-        onClick=function() local uri=Uri.parse("https://aistudio.google.com/app/apikey") service.startActivity(Intent(Intent.ACTION_VIEW, uri)) end; };
-      { TextView; text="Select Gemini Model:"; textSize="14sp"; textColor="#FF9800"; layout_marginBottom="5dp"; };
+      { Button; text="Create Free Gemini API Key"; textSize="14sp"; layout_width="fill"; layout_marginBottom="10dp"; onClick=function() local uri=Uri.parse("https://aistudio.google.com/app/apikey") service.startActivity(Intent(Intent.ACTION_VIEW, uri)) end; };
+      { TextView; text="Select Gemini Model (Free):"; textSize="14sp"; textColor="#FF9800"; layout_marginBottom="5dp"; };
       { Spinner; id="modelSpinner"; layout_width="fill"; layout_marginBottom="10dp"; };
       { Button; id="testBtn"; text="Test API"; textSize="15sp"; layout_width="fill"; layout_marginBottom="10dp"; };
       { TextView; id="testResult"; text=""; textSize="15sp"; gravity="center"; layout_marginBottom="15dp"; };
       { LinearLayout; orientation="horizontal"; layout_width="fill";
         { Button; text="Cancel"; layout_width="fill"; layout_weight="1"; onClick=function() dlg.dismiss() end; };
         { View; layout_width="10dp"; };
-        { Button; text="Save Settings"; layout_width="fill"; layout_weight="1";
-          onClick=function() appSettings.geminiApiKey=apiKeyInput.getText().toString() saveSettings() dlg.dismiss() end; };
+        { Button; text="Save Settings"; layout_width="fill"; layout_weight="1"; onClick=function() appSettings.geminiApiKey=apiKeyInput.getText().toString() saveSettings() dlg.dismiss() end; };
       };
     };
   }
@@ -508,36 +490,32 @@ function showSettingsDialog()
     testResult.setText("Testing... Please Wait")
     testResult.setTextColor(0xFFFF9800)
     testBtn.setEnabled(false)
-    local th = luajava.newInstance("java.lang.Thread", luajava.createProxy("java.lang.Runnable", {
-      run = function()
-        local success = false
-        local errMsg = ""
-        local ok, err = pcall(function()
-          import "java.net.URL"
-          local urlStr = "https://generativelanguage.googleapis.com/v1beta/models?key="..key
-          local url = URL(urlStr)
-          local conn = url.openConnection()
-          conn.setRequestMethod("GET")
-          conn.setConnectTimeout(15000)
-          conn.setReadTimeout(15000)
-          local code = conn.getResponseCode()
-          if code == 200 then success = true else success = false errMsg = "Code: "..code end
-        end)
-        if not ok then success = false errMsg = "Network Error" end
-        mainHandler.post(luajava.createProxy("java.lang.Runnable", {
-          run = function()
-            testBtn.setEnabled(true)
-            if success then
-              testResult.setText("Valid - API Key is Working")
-              testResult.setTextColor(0xFF00C853)
-            else
-              testResult.setText("Not Valid - Check API Key ("..errMsg..")")
-              testResult.setTextColor(0xFFFF0000)
-            end
-          end
-        }))
-      end
-    }))
+    local th = luajava.newInstance("java.lang.Thread", luajava.createProxy("java.lang.Runnable", { run = function()
+      local success = false
+      local errMsg = ""
+      local ok, err = pcall(function()
+        import "java.net.URL"
+        local urlStr = "https://generativelanguage.googleapis.com/v1beta/models?key="..key
+        local url = URL(urlStr)
+        local conn = url.openConnection()
+        conn.setRequestMethod("GET")
+        conn.setConnectTimeout(15000)
+        conn.setReadTimeout(15000)
+        local code = conn.getResponseCode()
+        if code == 200 then success = true else success = false errMsg = "Code: "..code end
+      end)
+      if not ok then success = false errMsg = "Network Error" end
+      mainHandler.post(luajava.createProxy("java.lang.Runnable", { run = function()
+        testBtn.setEnabled(true)
+        if success then
+          testResult.setText("Valid - API Key is Working")
+          testResult.setTextColor(0xFF00C853)
+        else
+          testResult.setText("Not Valid - Check API Key ("..errMsg..")")
+          testResult.setTextColor(0xFFFF0000)
+        end
+      end }))
+    end }))
     th.start()
   end
   dlg.setView(view)
@@ -563,7 +541,20 @@ function startVoiceTyping()
           spokenText = spokenText:gsub("%s([?,!])", "%1")
           if not spokenText:match("[.?!,.]$") then spokenText = spokenText .. punct end
         end
-        service.insertText(editText, spokenText)
+        -- Translation yahan se hogi
+        if appSettings.translationEnabled then
+          local targetCode = getSavedLanguage(transLangFile, "en-US")
+          local sourceCode = getSavedLanguage(langFile, "ur-PK")
+          if targetCode ~= sourceCode then
+            translateWithGemini(spokenText, targetCode, function(finalText)
+              mainHandler.post(luajava.createProxy("java.lang.Runnable", { run = function() service.insertText(editText, finalText) end }))
+            end)
+          else
+            service.insertText(editText, spokenText)
+          end
+        else
+          service.insertText(editText, spokenText)
+        end
       end
       speechRec.destroy()
     end,
@@ -590,18 +581,17 @@ function showFeedbackDialog()
     { LinearLayout; orientation="horizontal"; layout_width="fill";
       { Button; text="Cancel"; layout_width="fill"; layout_weight="1"; onClick=function() dlg.dismiss() end; };
       { View; layout_width="10dp"; };
-      { Button; text="Send"; layout_width="fill"; layout_weight="1";
-        onClick=function()
-          local name = fbName.getText().toString()
-          local num = fbNumber.getText().toString()
-          local msg = fbMsg.getText().toString()
-          if name=="" or msg=="" then return end
-          local fullMsg = "Feedback - Expensive Typer\n\nName: "..name.."\nWhatsApp: "..num.."\n\nFeedback:\n"..msg
-          local enc = Uri.encode(fullMsg)
-          local url = "https://wa.me/923057040811?text="..enc
-          service.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-          dlg.dismiss()
-        end; };
+      { Button; text="Send"; layout_width="fill"; layout_weight="1"; onClick=function()
+        local name = fbName.getText().toString()
+        local num = fbNumber.getText().toString()
+        local msg = fbMsg.getText().toString()
+        if name=="" or msg=="" then return end
+        local fullMsg = "Feedback - Expensive Typer\n\nName: "..name.."\nWhatsApp: "..num.."\n\nFeedback:\n"..msg
+        local enc = Uri.encode(fullMsg)
+        local url = "https://wa.me/923057040811?text="..enc
+        service.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        dlg.dismiss()
+      end; };
     };
   }
   dlg.setView(loadlayout(layout))
@@ -676,9 +666,7 @@ function showMainDialog()
   punctSpinner.onItemSelected=function(p,v,pos,id) appSettings.punctuationMode=punctuationOptions[pos+1] saveSettings() end
   dlg.setView(view)
   dlg.show()
-  mainHandler.postDelayed(luajava.createProxy("java.lang.Runnable", {
-    run = function() pcall(function() checkForUpdates(true) end) end
-  }), 3000)
+  mainHandler.postDelayed(luajava.createProxy("java.lang.Runnable", { run = function() pcall(function() checkForUpdates(true) end) end }), 3000)
 end
 
 loadDictionary()
