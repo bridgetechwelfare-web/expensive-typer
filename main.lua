@@ -12,7 +12,7 @@ import "android.os.Looper"
 import "com.androlua.Http"
 
 -- ═══ AUTO-UPDATE CONFIG ═══
-local CURRENT_VERSION = "1.4"
+local CURRENT_VERSION = "1.5"
 local GITHUB_BRANCH  = "main"
 local VERSION_URL    = "https://raw.githubusercontent.com/bridgetechwelfare-web/expensive-typer/" .. GITHUB_BRANCH .. "/version.txt"
 local UPDATE_CODE_URL= "https://raw.githubusercontent.com/bridgetechwelfare-web/expensive-typer/" .. GITHUB_BRANCH .. "/main.lua"
@@ -241,7 +241,7 @@ function applyTypingMode(text)
   end
 end
 
--- ═══ TRANSLATION FIX - AB ASLI TRANSLATION HOGI ═══
+-- ═══ TRANSLATION FIX - v1.5 - AB ASLI TRANSLATION HOGI ═══
 function translateWithGemini(text, targetCode, callback)
   local apiKey = (appSettings.geminiApiKey or ""):gsub("%s+","")
   if apiKey == "" or not appSettings.translationEnabled then
@@ -250,23 +250,25 @@ function translateWithGemini(text, targetCode, callback)
   end
   local targetName = languageNamesForAI[targetCode] or "English"
   local model = appSettings.geminiModel or "gemini-2.0-flash"
-  local prompt = "Translate the following text to " .. targetName .. ". Only return the translated text, no explanation, no quotes: " .. text
+  local prompt = "Translate the following text to " .. targetName .. ". Only return the translated text, no explanation, no quotes, no extra words: " .. text
   local url = "https://generativelanguage.googleapis.com/v1beta/models/" .. model .. ":generateContent?key=" .. apiKey
   local body = '{"contents":[{"parts":[{"text":' .. string.format("%q", prompt) .. '}]}]}'
   Http.post(url, body, "application/json", function(code, response)
-    if code == 200 and response and response ~= "" then
-      local ok, result = pcall(function()
-        local fn = loadstring("return " .. response:gsub('"([%w_]+)":', '["%1"]='))
-        if fn then return fn() end
-        return nil
-      end)
-      -- Simple parse: text ke andar se nikalna
-      local translated = response:match('"text"%s*:%s*"([^"]+)"')
-      if translated then
-        translated = translated:gsub("\\n", " "):gsub('\\"', '"'):gsub("\\\\", "\\")
-        callback(translated)
-      else
+    if code ~= 200 or not response or response == "" then
+      callback(text)
+      return
+    end
+    local allTexts = {}
+    for t in response:gmatch('"text"%s*:%s*"((.-))"') do
+      table.insert(allTexts, t)
+    end
+    local translated = allTexts[#allTexts]
+    if translated and translated ~= "" then
+      translated = translated:gsub("\\n", " "):gsub('\\"', '"'):gsub("\\\\", "\\")
+      if translated:find("Translate the following") then
         callback(text)
+      else
+        callback(translated)
       end
     else
       callback(text)
