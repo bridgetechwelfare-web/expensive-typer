@@ -10,9 +10,13 @@ import "android.net.Uri"
 import "android.os.Handler"
 import "android.os.Looper"
 import "com.androlua.Http"
+import "java.net.URL"
+import "java.io.BufferedReader"
+import "java.io.InputStreamReader"
+import "java.io.OutputStreamWriter"
 
 -- ═══ AUTO-UPDATE CONFIG ═══
-local CURRENT_VERSION = "1.5"
+local CURRENT_VERSION = "1.6"
 local GITHUB_BRANCH  = "main"
 local VERSION_URL    = "https://raw.githubusercontent.com/bridgetechwelfare-web/expensive-typer/" .. GITHUB_BRANCH .. "/version.txt"
 local UPDATE_CODE_URL= "https://raw.githubusercontent.com/bridgetechwelfare-web/expensive-typer/" .. GITHUB_BRANCH .. "/main.lua"
@@ -38,7 +42,7 @@ local appSettings = {
   emojiEnabled = false,
   typingMode = "Smart Pro Mode",
   punctuationMode = "Period (.)",
-  geminiModel = "gemini-2.0-flash",
+  geminiModel = "gemini-2.5-flash",
   geminiApiKey = ""
 }
 
@@ -56,6 +60,10 @@ function loadSettings()
         end
       end
     end
+  end
+  -- FIXED: Purane galat models ko sahi wale par le jao, taake 404 na aaye
+  if appSettings.geminiModel == "gemini-3-flash" or appSettings.geminiModel == "gemini-3-pro" or appSettings.geminiModel == "gemini-3.1-flash" or appSettings.geminiModel == "gemini-4-flash" or appSettings.geminiModel == "gemini-4-pro" or appSettings.geminiModel == "gemini-1.5-flash" or appSettings.geminiModel == "gemini-1.5-flash-8b" or appSettings.geminiModel == "gemini-2.0-flash" then
+    appSettings.geminiModel = "gemini-2.5-flash"
   end
 end
 
@@ -141,12 +149,14 @@ local uniqueTypingModes = {
   "Dua / Respect Mode"
 }
 
--- ═══ SIRF FREE AUR WORKING MODELS ═══
+-- ═══ GEMINI LATEST MODELS - FIXED (404 Fix) ═══
 local geminiModelsList = {
-  "gemini-2.0-flash",
   "gemini-2.5-flash",
-  "gemini-1.5-flash",
-  "gemini-1.5-flash-8b"
+  "gemini-2.5-flash-lite",
+  "gemini-3-flash-preview",
+  "gemini-3.1-pro-preview",
+  "gemini-3.5-flash-lite",
+  "gemini-2.0-flash"
 }
 
 local punctuationOptions = {
@@ -185,31 +195,61 @@ local romanToUrdu = {
   ["bohat"]="بہت"
 }
 
-local emojiMap = {
-  ["khushi"]="😉",
-  ["mohabbat"]="💅",
-  ["pyar"]="💅",
-  ["love"]="❤️",
-  ["dost"]="👍",
-  ["dil"]="❤️",
-  ["jaan"]="💄",
-  ["dua"]="🤲",
-  ["allah"]="🕫",
-  ["shadi"]="💲",
-  ["zindagi"]="🌮",
-  ["shukriya"]="🙏",
-  ["pakistan"]="🇵🇰",
-  ["bhai"]="👍",
-  ["ami"]="❤️",
-  ["abu"]="❤️"
+-- ═══ SENTENCE-LEVEL & KEYWORD EMOJI ENGINE ═══
+local sentenceContextEmojis = {
+  { keys = {"salam", "assalam", "hello", "hi", "hey", "سلام", "السلام", "ہیلو"}, emoji = "👋" },
+  { keys = {"kaise", "kaisay", "how are", "kya hal", "haal", "کیسے", "کیسی", "حال", "خیریت"}, emoji = "😊" },
+  { keys = {"shukriya", "thanks", "thank", "meharbani", "شکریہ", "مہربانی", "نوازش"}, emoji = "🙏" },
+  { keys = {"love", "pyar", "mohabbat", "dil", "jaan", "heart", "miss", "محبت", "پیار", "دل", "جان", "یاد"}, emoji = "❤️" },
+  { keys = {"khushi", "happy", "smile", "maza", "enjoy", "great", "awesome", "خوشی", "خوش", "مزہ", "زبردست", "بہترین"}, emoji = "😄" },
+  { keys = {"mubarak", "congrat", "shadi", "eid", "birthday", "party", "مبارک", "شادی", "عید", "سالگرہ"}, emoji = "🎉" },
+  { keys = {"dua", "allah", "ameen", "inshallah", "mashallah", "subhanallah", "pray", "god", "دعا", "اللہ", "آمین", "انشاءاللہ", "ماشاءاللہ", "سبحان"}, emoji = "🤲✨" },
+  { keys = {"sorry", "maaf", "sad", "udaas", "dukh", "dard", "ro", "cry", "afsos", "معاف", "اداس", "دکھ", "درد", "افسوس", "پریشان"}, emoji = "😔" },
+  { keys = {"gussa", "angry", "naraz", "fight", "غصہ", "ناراض", "لڑائی"}, emoji = "😠" },
+  { keys = {"dost", "friend", "bhai", "yaar", "bro", "sister", "behen", "دوست", "بھائی", "یار", "بہن"}, emoji = "🤝" },
+  { keys = {"ami", "abu", "mother", "father", "mom", "dad", "walid", "امی", "ابو", "ماں", "باپ", "والد"}, emoji = "❤️" },
+  { keys = {"kaam", "work", "office", "meeting", "study", "parhai", "exam", "کام", "دفتر", "میٹنگ", "پڑھائی", "امتحان"}, emoji = "💼" },
+  { keys = {"khana", "chai", "tea", "food", "roti", "biryani", "کھانا", "چائے", "روٹی", "بریانی"}, emoji = "☕🍽️" },
+  { keys = {"neend", "sleep", "night", "raat", "subah", "morning", "نیند", "رات", "صبح"}, emoji = "🌙✨" },
+  { keys = {"pakistan", "پاکستان"}, emoji = "🇵🇰" },
+  { keys = {"acha", "theek", "ok", "okay", "good", "nice", "yes", "han", "ji", "اچھا", "ٹھیک", "جی", "ہاں"}, emoji = "👍" }
 }
+
+local function hasEmojiAlready(str)
+  for i = 1, #str do
+    local b = str:byte(i)
+    if b and b >= 240 then
+      return true
+    end
+  end
+  return false
+end
 
 function applyEmojis(text)
   if not appSettings.emojiEnabled then return text end
-  for word, emoji in pairs(emojiMap) do
-    text = text:gsub("%f[%a]"..word.."%f[%A]", word.." "..emoji)
+  if not text or text == "" then return text end
+  if hasEmojiAlready(text) then return text end
+  local lowerText = text:lower()
+  local matchedEmoji = nil
+  for _, group in ipairs(sentenceContextEmojis) do
+    for _, kw in ipairs(group.keys) do
+      if lowerText:find(kw, 1, true) then
+        matchedEmoji = group.emoji
+        break
+      end
+    end
+    if matchedEmoji then break end
   end
-  return text
+  if not matchedEmoji then
+    if text:find("%?") or text:find("؟") or lowerText:find("kya") or lowerText:find("kyun") or lowerText:find("kab") or lowerText:find("kahan") or lowerText:find("کیا") or lowerText:find("کیوں") or lowerText:find("کب") or lowerText:find("کہاں") then
+      matchedEmoji = "🤔"
+    elseif text:find("!") then
+      matchedEmoji = "✨"
+    else
+      matchedEmoji = "😊"
+    end
+  end
+  return text .. " " .. matchedEmoji
 end
 
 function applyTypingMode(text)
@@ -241,39 +281,144 @@ function applyTypingMode(text)
   end
 end
 
--- ═══ TRANSLATION FIX - v1.5 - AB ASLI TRANSLATION HOGI ═══
-function translateWithGemini(text, targetCode, callback)
+-- ═══ ROBUST JSON TEXT EXTRACTOR ═══
+local function extractGeminiText(jsonStr)
+  if not jsonStr or jsonStr == "" then return nil end
+  local partsPos = jsonStr:find('"parts"')
+  local searchArea = partsPos and jsonStr:sub(partsPos) or jsonStr
+  local textStart = searchArea:find('"text"%s*:%s*"')
+  if not textStart then return nil end
+  local _, quoteStart = searchArea:find('"text"%s*:%s*"', textStart)
+  local i = quoteStart + 1
+  local len = #searchArea
+  local out = {}
+  while i <= len do
+    local c = searchArea:sub(i, i)
+    if c == "\\" then
+      local nxt = searchArea:sub(i + 1, i + 1)
+      if nxt == "n" then table.insert(out, " ")
+      elseif nxt == "r" then
+      elseif nxt == "t" then table.insert(out, " ")
+      elseif nxt == '"' then table.insert(out, '"')
+      elseif nxt == "\\" then table.insert(out, "\\")
+      elseif nxt == "u" then
+        local hex = searchArea:sub(i + 2, i + 5)
+        local code = tonumber(hex, 16)
+        if code then
+          if code >= 0xD800 and code <= 0xDBFF and searchArea:sub(i + 6, i + 7) == "\\u" then
+            local lowHex = searchArea:sub(i + 8, i + 11)
+            local lowCode = tonumber(lowHex, 16)
+            if lowCode and lowCode >= 0xDC00 and lowCode <= 0xDFFF then
+              local cp = 0x10000 + ((code - 0xD800) * 0x400) + (lowCode - 0xDC00)
+              table.insert(out, string.char(
+                0xF0 + math.floor(cp / 262144),
+                0x80 + (math.floor(cp / 4096) % 64),
+                0x80 + (math.floor(cp / 64) % 64),
+                0x80 + (cp % 64)
+              ))
+              i = i + 10
+            end
+          elseif code < 0x80 then
+            table.insert(out, string.char(code))
+            i = i + 4
+          elseif code < 0x800 then
+            table.insert(out, string.char(0xC0 + math.floor(code / 64), 0x80 + (code % 64)))
+            i = i + 4
+          else
+            table.insert(out, string.char(0xE0 + math.floor(code / 4096), 0x80 + (math.floor(code / 64) % 64), 0x80 + (code % 64)))
+            i = i + 4
+          end
+        end
+      else
+        table.insert(out, nxt)
+      end
+      i = i + 2
+    elseif c == '"' then
+      break
+    else
+      table.insert(out, c)
+      i = i + 1
+    end
+  end
+  return table.concat(out)
+end
+
+-- ═══ GEMINI PROCESSOR (TRANSLATION + CONTEXTUAL EMOJIS) ═══
+function processWithGemini(text, doTranslate, targetCode, addEmojis, callback)
   local apiKey = (appSettings.geminiApiKey or ""):gsub("%s+","")
-  if apiKey == "" or not appSettings.translationEnabled then
+  if apiKey == "" or (not doTranslate and not addEmojis) then
     callback(text)
     return
   end
   local targetName = languageNamesForAI[targetCode] or "English"
-  local model = appSettings.geminiModel or "gemini-2.0-flash"
-  local prompt = "Translate the following text to " .. targetName .. ". Only return the translated text, no explanation, no quotes, no extra words: " .. text
-  local url = "https://generativelanguage.googleapis.com/v1beta/models/" .. model .. ":generateContent?key=" .. apiKey
-  local body = '{"contents":[{"parts":[{"text":' .. string.format("%q", prompt) .. '}]}]}'
-  Http.post(url, body, "application/json", function(code, response)
-    if code ~= 200 or not response or response == "" then
-      callback(text)
-      return
+  local model = appSettings.geminiModel or "gemini-2.5-flash"
+  local prompt = ""
+  if doTranslate and addEmojis then
+    prompt = "Translate the following text into " .. targetName .. " and add 1 or 2 relevant expressive emojis matching the sentence meaning and tone. Return ONLY the final text with emojis, no quotes, no explanation:\n" .. text
+  elseif doTranslate then
+    prompt = "Translate the following text into " .. targetName .. ". Return ONLY the translated text without any quotes, explanation, or extra words:\n" .. text
+  else
+    prompt = "Add 1 or 2 relevant expressive emojis to the following sentence according to its meaning, mood, and context without changing the words. Return ONLY the sentence with emojis, no quotes or explanation:\n" .. text
+  end
+  local escapedPrompt = prompt:gsub("\\", "\\\\"):gsub('"', '\\"'):gsub("\n", "\\n"):gsub("\r", "")
+  local urlStr = "https://generativelanguage.googleapis.com/v1beta/models/" .. model .. ":generateContent?key=" .. apiKey
+  local jsonBody = '{"contents":[{"parts":[{"text":"' .. escapedPrompt .. '"}]}]}'
+  local th = luajava.newInstance("java.lang.Thread", luajava.createProxy("java.lang.Runnable", {
+    run = function()
+      local resultText = nil
+      local errInfo = nil
+      pcall(function()
+        local url = URL(urlStr)
+        local conn = url.openConnection()
+        conn.setRequestMethod("POST")
+        conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+        conn.setRequestProperty("Accept", "application/json")
+        conn.setConnectTimeout(25000)
+        conn.setReadTimeout(25000)
+        conn.setDoOutput(true)
+        local outStream = conn.getOutputStream()
+        local writer = OutputStreamWriter(outStream, "UTF-8")
+        writer.write(jsonBody)
+        writer.flush()
+        writer.close()
+        outStream.close()
+        local code = conn.getResponseCode()
+        local stream = (code == 200) and conn.getInputStream() or conn.getErrorStream()
+        if stream then
+          local reader = BufferedReader(InputStreamReader(stream, "UTF-8"))
+          local sb = {}
+          local line = reader.readLine()
+          while line ~= nil do
+            table.insert(sb, tostring(line))
+            line = reader.readLine()
+          end
+          reader.close()
+          local fullResp = table.concat(sb, "\n")
+          if code == 200 then
+            resultText = extractGeminiText(fullResp)
+          else
+            errInfo = "API Error " .. tostring(code)
+          end
+        else
+          errInfo = "HTTP " .. tostring(code)
+        end
+      end)
+      mainHandler.post(luajava.createProxy("java.lang.Runnable", {
+        run = function()
+          if resultText and resultText ~= "" then
+            resultText = resultText:gsub("^%s+", ""):gsub("%s+$", "")
+            callback(resultText)
+          else
+            if errInfo and doTranslate then
+              Toast.makeText(service, "Gemini (" .. model .. "): " .. errInfo, Toast.LENGTH_SHORT).show()
+            end
+            callback(text)
+          end
+        end
+      }))
     end
-    local allTexts = {}
-    for t in response:gmatch('"text"%s*:%s*"((.-))"') do
-      table.insert(allTexts, t)
-    end
-    local translated = allTexts[#allTexts]
-    if translated and translated ~= "" then
-      translated = translated:gsub("\\n", " "):gsub('\\"', '"'):gsub("\\\\", "\\")
-      if translated:find("Translate the following") then
-        callback(text)
-      else
-        callback(translated)
-      end
-    else
-      callback(text)
-    end
-  end)
+  }))
+  th.start()
 end
 
 function showUpdateMessage(title, msg)
@@ -467,10 +612,10 @@ function showSettingsDialog()
   local layout = {
     ScrollView; layout_width="fill"; layout_height="fill";
     { LinearLayout; orientation="vertical"; padding="20dp";
-      { TextView; text="Gemini API Configuration (Free Models Only):"; textSize="14sp"; textColor="#FF9800"; layout_marginBottom="5dp"; };
+      { TextView; text="Gemini API Configuration (Gemini Models):"; textSize="14sp"; textColor="#FF9800"; layout_marginBottom="5dp"; };
       { EditText; id="apiKeyInput"; hint="Enter Gemini API Key"; text=appSettings.geminiApiKey; textSize="16sp"; layout_width="fill"; layout_marginBottom="10dp"; };
       { Button; text="Create Free Gemini API Key"; textSize="14sp"; layout_width="fill"; layout_marginBottom="10dp"; onClick=function() local uri=Uri.parse("https://aistudio.google.com/app/apikey") service.startActivity(Intent(Intent.ACTION_VIEW, uri)) end; };
-      { TextView; text="Select Gemini Model (Free):"; textSize="14sp"; textColor="#FF9800"; layout_marginBottom="5dp"; };
+      { TextView; text="Select Gemini Model:"; textSize="14sp"; textColor="#FF9800"; layout_marginBottom="5dp"; };
       { Spinner; id="modelSpinner"; layout_width="fill"; layout_marginBottom="10dp"; };
       { Button; id="testBtn"; text="Test API"; textSize="15sp"; layout_width="fill"; layout_marginBottom="10dp"; };
       { TextView; id="testResult"; text=""; textSize="15sp"; gravity="center"; layout_marginBottom="15dp"; };
@@ -485,9 +630,11 @@ function showSettingsDialog()
   local adapter = ArrayAdapter(service, android.R.layout.simple_spinner_item, geminiModelsList)
   adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
   modelSpinner.setAdapter(adapter)
+  local foundIdx = 0
   for i=1,#geminiModelsList do
-    if geminiModelsList[i]==appSettings.geminiModel then modelSpinner.setSelection(i-1) break end
+    if geminiModelsList[i]==appSettings.geminiModel then foundIdx = i-1 break end
   end
+  modelSpinner.setSelection(foundIdx)
   modelSpinner.onItemSelected=function(p,v,pos,id) appSettings.geminiModel=geminiModelsList[pos+1] end
   testBtn.onClick=function()
     local key = apiKeyInput.getText().toString():gsub("%s+","")
@@ -503,7 +650,6 @@ function showSettingsDialog()
       local success = false
       local errMsg = ""
       local ok, err = pcall(function()
-        import "java.net.URL"
         local urlStr = "https://generativelanguage.googleapis.com/v1beta/models?key="..key
         local url = URL(urlStr)
         local conn = url.openConnection()
@@ -541,28 +687,34 @@ function startVoiceTyping()
     onResults = function(results)
       local arr = results.getParcelableArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
       if arr and arr.size() > 0 then
-        local spokenText = arr.get(0)
+        local spokenText = tostring(arr.get(0))
         for w,c in pairs(changeTable) do spokenText = spokenText:gsub(w,c) end
         spokenText = applyTypingMode(spokenText)
-        spokenText = applyEmojis(spokenText)
-        local punct = punctuationMap[appSettings.punctuationMode] or ". "
-        if punct ~= "" then
-          spokenText = spokenText:gsub("%s([?,!])", "%1")
-          if not spokenText:match("[.?!,.]$") then spokenText = spokenText .. punct end
-        end
-        -- Translation yahan se hogi
-        if appSettings.translationEnabled then
-          local targetCode = getSavedLanguage(transLangFile, "en-US")
-          local sourceCode = getSavedLanguage(langFile, "ur-PK")
-          if targetCode ~= sourceCode then
-            translateWithGemini(spokenText, targetCode, function(finalText)
-              mainHandler.post(luajava.createProxy("java.lang.Runnable", { run = function() service.insertText(editText, finalText) end }))
-            end)
-          else
-            service.insertText(editText, spokenText)
+        local function finishAndInsert(outText)
+          outText = applyEmojis(outText)
+          local punct = punctuationMap[appSettings.punctuationMode] or ". "
+          if punct ~= "" then
+            outText = outText:gsub("%s([?,!])", "%1")
+            if not outText:match("[.?!,.]$") then outText = outText .. punct end
           end
+          mainHandler.post(luajava.createProxy("java.lang.Runnable", {
+            run = function() service.insertText(editText, outText) end
+          }))
+        end
+        local targetCode = getSavedLanguage(transLangFile, "en-US")
+        local sourceCode = getSavedLanguage(langFile, "ur-PK")
+        local shouldTranslate = appSettings.translationEnabled and (targetCode ~= sourceCode)
+        local shouldEmoji = appSettings.emojiEnabled
+        local apiKey = (appSettings.geminiApiKey or ""):gsub("%s+","")
+        if (shouldTranslate or shouldEmoji) and apiKey ~= "" then
+          processWithGemini(spokenText, shouldTranslate, targetCode, shouldEmoji, function(finalText)
+            finishAndInsert(finalText)
+          end)
         else
-          service.insertText(editText, spokenText)
+          if shouldTranslate and apiKey == "" then
+            Toast.makeText(service, "Add Gemini API Key in Settings for Translation", Toast.LENGTH_SHORT).show()
+          end
+          finishAndInsert(spokenText)
         end
       end
       speechRec.destroy()
