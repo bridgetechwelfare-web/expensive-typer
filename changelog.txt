@@ -1,5 +1,22 @@
- What's New in v1.5
-- Translation is now fully fixed and working.
-- What's New message will now show first before opening the extension.
-- Removed all paid models. Only free and working models are available now.
-- App is now more smooth, fast and stable.
+What's New in v1.6 - Expensive Typer
+
+1. 404 Error Fixed:
+Fixed Gemini API 404 Error. Translation is now working perfectly.
+
+2. Gemini Models Updated:
+Removed old invalid models (Gemini 3 Flash, 3.1 Flash, 4 Flash).
+Added new working models:
+- gemini-2.5-flash (Default)
+- gemini-2.5-flash-lite
+- gemini-3-flash-preview
+
+3. Translation Fix:
+Fixed translation issue where text was typed directly without translation. Now translation works correctly.
+
+4. Auto Model Fix:
+If your old invalid model was saved, the App will now automatically switch it to the correct working model.
+
+5. Version Updated:
+Updated from Version 1.5 to 1.6.
+
+Developed by Bridge Tech | Project by AbdulRafay
